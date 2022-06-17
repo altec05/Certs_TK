@@ -1,22 +1,31 @@
 import datetime
-# from datetime import datetime
 from tkinter import *
 from tkinter import messagebox
 import tkinter as tk
-import tkinter.ttk as ttk
 import sqlite3
 import os
 import fsb795
 import locale
 from tkinter import filedialog
 from tkinter import ttk
+from pathlib import Path
 
 locale.setlocale(locale.LC_ALL, 'ru_RU.UTF-8')
+id_value = ''
+path_default = os.path.join(os.path.join(os.environ['USERPROFILE']), 'Documents')
+path_db = os.path.join(os.path.join(os.environ['USERPROFILE']), 'Documents', 'Сертификаты', 'db')
 
 
 class Table(tk.Frame):
     def __init__(self, parent=None, headings=tuple(), rows=tuple()):
         super().__init__(parent)
+
+        def item_selected(event):
+            for selected_item in table.selection():
+                item = table.item(selected_item)
+                global id_value
+                record = item['values']
+                id_value = record[0]
 
         table = ttk.Treeview(self, show="headings", selectmode="browse")
         table["columns"] = headings
@@ -32,11 +41,12 @@ class Table(tk.Frame):
         scrolltable = tk.Scrollbar(self, command=table.yview)
         table.configure(yscrollcommand=scrolltable.set)
         scrolltable.pack(side=tk.RIGHT, fill=tk.Y)
+
+        table.bind('<<TreeviewSelect>>', item_selected)
         table.pack(expand=tk.YES, fill=tk.BOTH)
 
 
 def check_path(path):
-    # print(cert_path)
     if os.path.exists(path):
         label1['text'] = f'Путь существует!'
         return True
@@ -67,18 +77,20 @@ def get_serts(get_path):
                     start = get_date(cert)[0]
                     stop = get_date(cert)[1]
                     ogrn = str(get_name(cert)[4])
+                    note = str(get_city(cert))
 
-                    data = (name, job, get_sn(cert), start, stop, get_uc(cert), inn, snils, ogrn)
+                    data = (name, job, get_sn(cert), start, stop, get_uc(cert), inn, snils, ogrn, note)
                     all_data.append(data)
 
-                db = sqlite3.connect('../Certificates.sqlite')
+                db = sqlite3.connect(path_db + '/Certificates.sqlite')
 
                 cursor = db.cursor()
 
                 cursor.executemany(
-                    "INSERT OR IGNORE INTO certs (name, job, serial_number, start_time, end_time, uc, inn, snils, ogrn"
+                    "INSERT OR IGNORE INTO certs (name, job, serial_number, start_time, end_time, uc, inn, snils, "
+                    "ogrn, note"
                     ") VALUES(?,?, "
-                    "?, ?, ?, ?, ?, ?, ?)",
+                    "?, ?, ?, ?, ?, ?, ?, ?)",
                     all_data, )
                 changes = db.total_changes
 
@@ -100,16 +112,18 @@ def get_serts(get_path):
                 start = get_date(cert)[0]
                 stop = get_date(cert)[1]
                 ogrn = str(get_name(cert)[4])
-                data = (name, job, get_sn(cert), start, stop, get_uc(cert), inn, snils, ogrn)
+                note = str(get_city(cert))
+                data = (name, job, get_sn(cert), start, stop, get_uc(cert), inn, snils, ogrn, note)
                 all_data.append(data)
 
-                db = sqlite3.connect('../Certificates.sqlite')
+                db = sqlite3.connect(path_db + '/Certificates.sqlite')
                 cursor = db.cursor()
 
                 cursor.executemany(
-                    "INSERT OR IGNORE INTO certs (name, job, serial_number, start_time, end_time, uc, inn, snils, ogrn"
+                    "INSERT OR IGNORE INTO certs (name, job, serial_number, start_time, end_time, uc, inn, snils, "
+                    "ogrn, note"
                     ") VALUES(?,?, "
-                    "?, ?, ?, ?, ?, ?, ?)",
+                    "?, ?, ?, ?, ?, ?, ?, ?)",
                     all_data, )
                 changes = db.total_changes
 
@@ -137,7 +151,6 @@ def get_name(cert):
     ogrn = ''
     sub, vlad_sub = cert.subjectCert()
     for key in sub.keys():
-        # print(key + '=' + sub[key])
         if key == 'CN':
             cn = sub[key]
         if key == 'title':
@@ -160,7 +173,22 @@ def get_date(cert):
 
 
 def get_sn(cert):
-    hex_output = decimal_to_hex(str(cert.serialNumber()))
+    conversion_table = {0: '0', 1: '1', 2: '2', 3: '3', 4: '4',
+                        5: '5', 6: '6', 7: '7',
+                        8: '8', 9: '9', 10: 'A', 11: 'B', 12: 'C',
+                        13: 'D', 14: 'E', 15: 'F'}
+
+    def decimalToHexadecimal(decimal):
+        hexadecimal = ''
+        while (decimal > 0):
+            remainder = decimal % 16
+            hexadecimal = conversion_table[remainder] + hexadecimal
+            decimal = decimal // 16
+
+        return hexadecimal
+
+    # hex_output = decimal_to_hex(str(cert.serialNumber()))
+    hex_output = decimalToHexadecimal(cert.serialNumber())
     return hex_output
 
 
@@ -178,6 +206,17 @@ def get_uc(cert):
         if key == 'CN':
             uc = iss[key]
     return uc
+
+
+def get_city(cert):
+    city = ''
+    sub, vlad_sub = cert.subjectCert()
+    for key in sub.keys():
+        if key == 'L':
+            city = sub[key]
+        if key == 'serialNumber':
+            print(key, sub[key])
+    return city
 
 
 def find_certs(folder):
@@ -199,7 +238,7 @@ def del_certs():
     for widget in f3.winfo_children():
         widget.destroy()
 
-    db = sqlite3.connect('../Certificates.sqlite')
+    db = sqlite3.connect(path_db + '/Certificates.sqlite')
     cursor = db.cursor()
     try:
         cursor.execute("DROP TABLE certs")
@@ -214,7 +253,23 @@ def del_certs():
 
 
 def check_certs():
-    db = sqlite3.connect('../Certificates.sqlite')
+    try:
+        os.mkdir(path_default)
+    except FileExistsError:
+        pass
+    finally:
+        try:
+            os.mkdir(path_default + '/Сертификаты')
+        except FileExistsError:
+            pass
+        finally:
+            try:
+                os.mkdir(path_default + '/Сертификаты' + '/db/')
+                create_db()
+            except FileExistsError:
+                create_db()
+
+    db = sqlite3.connect(path_db + '/Certificates.sqlite')
     cursor = db.cursor()
 
     try:
@@ -230,7 +285,7 @@ def check_certs():
 
 
 def check_id(id_check):
-    db = sqlite3.connect('../Certificates.sqlite')
+    db = sqlite3.connect(path_db + '/Certificates.sqlite')
     cursor = db.cursor()
     sql_check_id_query = """SELECT * FROM certs WHERE id = ?"""
     cursor.execute(sql_check_id_query, (id_check,))
@@ -242,11 +297,10 @@ def check_id(id_check):
 
 
 def create_db():
-    db = sqlite3.connect('../Certificates.sqlite')
+    db = sqlite3.connect(path_db + '/Certificates.sqlite')
     cursor = db.cursor()
 
     try:
-        # cursor.execute('''CREATE TABLE IF NOT EXISTS certs (
         cursor.execute('''CREATE TABLE certs (
             id INTEGER PRIMARY KEY,
             name TEXT NOT NULL,
@@ -276,7 +330,6 @@ def open_file():
         get_path = filedialog.askopenfilename(title="Выбор файла", filetypes=(("Сертификаты (*.cer)", "*.cer"),
                                                                               ("Все файлы", "*.*")))
         if get_path:
-            # print(get_path)
             if check_certs():
                 get_serts(get_path)
                 show_table()
@@ -306,7 +359,7 @@ def show_table():
     if check_certs():
         label1['text'] = f'Напоминание: Для автоширины нажмите на границу между названиями столбцов!'
         data = ()
-        with sqlite3.connect('../Certificates.sqlite') as connection:
+        with sqlite3.connect(path_db + '/Certificates.sqlite') as connection:
             cursor = connection.cursor()
             cursor.execute("SELECT * FROM certs ORDER BY id")
             data = (row for row in cursor.fetchall())
@@ -325,10 +378,11 @@ def sort_ogrn():
     if check_certs():
         label1['text'] = f'Напоминание: Для автоширины нажмите на границу между названиями столбцов!'
         data = ()
-        with sqlite3.connect('../Certificates.sqlite') as connection:
+        with sqlite3.connect(path_db + '/Certificates.sqlite') as connection:
             cursor = connection.cursor()
             cursor.execute("SELECT * FROM certs WHERE ogrn != '' ORDER BY name")
             data = (row for row in cursor.fetchall())
+        print(type(data), data)
 
         table = Table(f3, headings=('ID', 'ФИО', 'Должность', 'Серийный номер', 'От', 'До', 'УЦ', 'СНИЛС', 'ИНН',
                                     'ОГРН', 'Заметки'), rows=data)
@@ -339,7 +393,7 @@ def sort_ogrn():
 
 def del_values():
     if check_certs():
-        db = sqlite3.connect('../Certificates.sqlite')
+        db = sqlite3.connect(path_db + '/Certificates.sqlite')
         cursor = db.cursor()
         cursor.execute("DELETE FROM certs")
         db.commit()
@@ -352,6 +406,56 @@ def del_values():
         label1['text'] = f'Таблица не существует!'
 
 
+def sort():
+    print(combo_sort.get())
+    if combo_sort.get() == "ФИО":
+        sort_name()
+    if combo_sort.get() == "Должность":
+        sort_time()
+    if combo_sort.get() == "Дата окончания":
+        sort_job()
+    if combo_sort.get() == "Заметки":
+        sort_note()
+
+
+def sort_job():
+    for widget in f3.winfo_children():
+        widget.destroy()
+
+    if check_certs():
+        label1['text'] = f'Напоминание: Для автоширины нажмите на границу между названиями столбцов!'
+        data = ()
+        with sqlite3.connect(path_db + '/Certificates.sqlite') as connection:
+            cursor = connection.cursor()
+            cursor.execute("SELECT * FROM certs ORDER BY job")
+            data = (row for row in cursor.fetchall())
+
+        table = Table(f3, headings=('ID', 'ФИО', 'Должность', 'Серийный номер', 'От', 'До', 'УЦ', 'СНИЛС', 'ИНН',
+                                    'ОГРН', 'Заметки'), rows=data)
+        table.pack(expand=tk.YES, fill=tk.BOTH)
+    else:
+        label1['text'] = f'Таблица не существует!'
+
+
+def sort_note():
+    for widget in f3.winfo_children():
+        widget.destroy()
+
+    if check_certs():
+        label1['text'] = f'Напоминание: Для автоширины нажмите на границу между названиями столбцов!'
+        data = ()
+        with sqlite3.connect(path_db + '/Certificates.sqlite') as connection:
+            cursor = connection.cursor()
+            cursor.execute("SELECT * FROM certs ORDER BY note")
+            data = (row for row in cursor.fetchall())
+
+        table = Table(f3, headings=('ID', 'ФИО', 'Должность', 'Серийный номер', 'От', 'До', 'УЦ', 'СНИЛС', 'ИНН',
+                                    'ОГРН', 'Заметки'), rows=data)
+        table.pack(expand=tk.YES, fill=tk.BOTH)
+    else:
+        label1['text'] = f'Таблица не существует!'
+
+
 def sort_name():
     for widget in f3.winfo_children():
         widget.destroy()
@@ -359,7 +463,7 @@ def sort_name():
     if check_certs():
         label1['text'] = f'Напоминание: Для автоширины нажмите на границу между названиями столбцов!'
         data = ()
-        with sqlite3.connect('../Certificates.sqlite') as connection:
+        with sqlite3.connect(path_db + '/Certificates.sqlite') as connection:
             cursor = connection.cursor()
             cursor.execute("SELECT * FROM certs ORDER BY name")
             data = (row for row in cursor.fetchall())
@@ -378,8 +482,8 @@ def sort_time():
     if check_certs():
         label1['text'] = f'Напоминание: Для автоширины нажмите на границу между названиями столбцов!'
         data = ()
-        with sqlite3.connect('../Certificates.sqlite', detect_types=sqlite3.PARSE_DECLTYPES |
-                                                                    sqlite3.PARSE_COLNAMES) \
+        with sqlite3.connect(path_db + '/Certificates.sqlite', detect_types=sqlite3.PARSE_DECLTYPES |
+                                                                            sqlite3.PARSE_COLNAMES) \
                 as connection:
             cursor = connection.cursor()
             cursor.execute("SELECT * FROM certs ORDER BY end_time")
@@ -394,37 +498,29 @@ def sort_time():
 
 
 def del_id():
-    db = sqlite3.connect('../Certificates.sqlite')
+    db = sqlite3.connect(path_db + '/Certificates.sqlite')
     cursor = db.cursor()
-    if e.get() != '':
-        if e.get().isdigit():
-            if check_id(e.get()):
-                try:
-                    del_ID = e.get()
-                    sql_update_query = """DELETE FROM certs WHERE id = ?"""
-                    cursor.execute(sql_update_query, (del_ID,))
-                    db.commit()
-                    label1['text'] = f'Запись удалена из таблицы!'
-                    e.delete(0, END)
-                    db.close()
-                    for widget in f3.winfo_children():
-                        widget.destroy()
-                    show_table()
-                except:
-                    label1['text'] = f'Ошибка удаления!'
-                    e.delete(0, END)
-                    db.close()
-            else:
-                label1['text'] = f'Введенный ID не зарегистрирован!'
+    global id_value
+    if id_value != '':
+        if check_id(id_value):
+            try:
+                del_ID = id_value
+                sql_update_query = """DELETE FROM certs WHERE id = ?"""
+                cursor.execute(sql_update_query, (del_ID,))
+                db.commit()
+                label1['text'] = f'Запись удалена из таблицы!'
+                db.close()
+                for widget in f3.winfo_children():
+                    widget.destroy()
+                show_table()
+                id_value = ''
+            except:
+                label1['text'] = f'Ошибка удаления!'
+                db.close()
         else:
-            label1['text'] = f'ID должен состоять только из цифр!'
+            label1['text'] = f'Введенный ID не зарегистрирован!'
     else:
-        label1['text'] = f'Для удаления введите ID из таблицы!'
-
-
-def print_width():
-    print(root['width'])
-    print(print(root.geometry()))
+        label1['text'] = f'Для удаления выберите значение из таблицы!'
 
 
 def clear_frame_table_and_show():
@@ -437,7 +533,7 @@ def check_near_info():
     if check_certs():
         now = datetime.date.today()
 
-        db = sqlite3.connect('../Certificates.sqlite',
+        db = sqlite3.connect(path_db + '/Certificates.sqlite',
                              detect_types=sqlite3.PARSE_DECLTYPES |
                                           sqlite3.PARSE_COLNAMES)
         cursor = db.cursor()
@@ -451,13 +547,11 @@ def check_near_info():
             period = date_cert - now
             if period.days < 90:
                 near.append(cert)
-                print(near, len(near), period.days)
-        print(near, len(near))
         if len(near) > 0:
             messagebox.showinfo(title="Истечение срока действия сертификатов", message="Внимание!\nОбнаружены "
-                                                                                      "сертификаты, срок действия "
-                                                                                      f"которых заканчивается: "
-                                                                                      f"{len(near)}")
+                                                                                       "сертификаты, срок действия "
+                                                                                       f"которых заканчивается: "
+                                                                                       f"{len(near)}")
         db.close()
 
 
@@ -468,7 +562,7 @@ def check_near():
     if check_certs():
         now = datetime.date.today()
 
-        db = sqlite3.connect('../Certificates.sqlite',
+        db = sqlite3.connect(path_db + '/Certificates.sqlite',
                              detect_types=sqlite3.PARSE_DECLTYPES |
                                           sqlite3.PARSE_COLNAMES)
         cursor = db.cursor()
@@ -482,8 +576,6 @@ def check_near():
             period = date_cert - now
             if period.days < 90:
                 near.append(cert)
-                print(near, len(near), period.days)
-        print(near, len(near))
         db.close()
         return near
     else:
@@ -504,6 +596,7 @@ def show_near(near):
 
     label1['text'] = f'Сертификатов, срок действия которых истекает: {len(near)}'
 
+
 def open_win_edits():
     if check_certs():
         def message(text):
@@ -519,8 +612,8 @@ def open_win_edits():
             )
 
         def get_query():
-            if e_id.get() != '' and e_id.get().isdigit():
-                id = e_id.get()
+            if id_value != '':
+                id = id_value
                 sn = e_sn.get()
                 note = e_note.get()
                 send = list()
@@ -536,17 +629,18 @@ def open_win_edits():
                 message('Некорректный ID!')
 
         def update_certs():
-            if e_id.get() == '':
-                message('Введите ID!')
+            global id_value
+            if id_value == '':
+                message('Выберите значение в таблице!')
             else:
                 if e_sn.get() == '' and e_note.get() == '':
                     message('Введите данные для обновления!')
                 else:
                     send = list(get_query())
-                    if check_id(e_id.get()):
+                    if check_id(id_value):
+                        db = sqlite3.connect(path_db + '/Certificates.sqlite')
                         try:
                             if send[1] != '':
-                                db = sqlite3.connect('../Certificates.sqlite')
                                 cursor = db.cursor()
                                 sql_sn_query = """UPDATE certs SET serial_number = ? WHERE id = ?"""
                                 cursor.execute(sql_sn_query, (send[1], send[0]))
@@ -554,16 +648,15 @@ def open_win_edits():
                                 db.close()
                                 message_info('Серийный номер обновлен!')
                             if send[2] != '':
-                                db = sqlite3.connect('../Certificates.sqlite')
+                                db = sqlite3.connect(path_db + '/Certificates.sqlite')
                                 cursor = db.cursor()
                                 sql_sn_query = """UPDATE certs SET note = ? WHERE id = ?"""
                                 cursor.execute(sql_sn_query, (send[2], send[0]))
                                 db.commit()
                                 db.close()
                                 message_info('Заметка добавлена!')
-
+                            id_value = ''
                             e_sn.delete(0, END)
-                            e_id.delete(0, END)
                             e_note.delete(0, END)
 
                             for widget in f3.winfo_children():
@@ -572,8 +665,9 @@ def open_win_edits():
                             show_table_win()
                         except:
                             message('Ошибка обновления данных!')
+                            db.close()
                     else:
-                        message('Введенный ID не зарегистрирован!')
+                        message('Выбранный ID не зарегистрирован!')
 
         def show_table_win():
             for widget in f3.winfo_children():
@@ -581,7 +675,7 @@ def open_win_edits():
 
             if check_certs():
                 data = ()
-                with sqlite3.connect('../Certificates.sqlite') as connection:
+                with sqlite3.connect(path_db + '/Certificates.sqlite') as connection:
                     cursor = connection.cursor()
                     cursor.execute("SELECT * FROM certs ORDER BY name")
                     data = (row for row in cursor.fetchall())
@@ -594,15 +688,12 @@ def open_win_edits():
                 message('Таблица не существует!')
 
         def find_table_win():
-            print(win['width'])
-            print(print(win.geometry()))
-
             for widget in f3.winfo_children():
                 widget.destroy()
 
             if check_certs():
                 data = ()
-                with sqlite3.connect('../Certificates.sqlite') as connection:
+                with sqlite3.connect(path_db + '/Certificates.sqlite') as connection:
                     cursor = connection.cursor()
                     find = e_find.get().title()
                     sql_find_query = """SELECT * FROM certs WHERE name = ? ORDER BY name"""
@@ -624,7 +715,7 @@ def open_win_edits():
 
         def del_values():
             if check_certs():
-                db = sqlite3.connect('../Certificates.sqlite')
+                db = sqlite3.connect(path_db + '/Certificates.sqlite')
                 cursor = db.cursor()
                 cursor.execute("DELETE FROM certs")
                 db.commit()
@@ -673,11 +764,8 @@ def open_win_edits():
                           pady=5)
         btn_find.pack(side=RIGHT)
 
-        label_win_id = Label(f2, font="Verdana 9", text='Изменить для ID', bg='#73777B', fg='#EEFF8E')
+        label_win_id = Label(f2, font="Verdana 9", text='Изменить для выбранного значения', bg='#73777B', fg='#EEFF8E')
         label_win_id.pack(side=LEFT, fill=X)
-
-        e_id = Entry(f2, width=10, font="Verdana 10")
-        e_id.pack(padx=10, ipady=2, side=LEFT)
 
         label_win_sn = Label(f2, font="Verdana 9", text='серийный номер на', bg='#73777B', fg='#EEFF8E')
         label_win_sn.pack(side=LEFT, fill=X)
@@ -709,20 +797,24 @@ s.theme_use('alt')
 main_menu = Menu(root)
 root.config(menu=main_menu, bg="#F1EEE9")
 
-# Table certs
+# Взаимодействие с таблицей
 table_menu = Menu(main_menu, tearoff=0)
-table_menu.add_command(label="Изменить данные в таблице", command=open_win_edits)
 table_menu.add_command(label="Очистить таблицу", command=del_values)
 table_menu.add_command(label="Создать таблицу", command=create_db)
 table_menu.add_command(label="Удалить таблицу", command=del_certs)
 table_menu.add_command(label="Проверить существование таблицы", command=check_certs)
 main_menu.add_cascade(label="Таблица", menu=table_menu)
 
-# File
+# Заполнение сертификатов
 file_menu = Menu(main_menu, tearoff=0)
-file_menu.add_command(label="Выбрать сертификат", command=open_file)
-file_menu.add_command(label="Выбрать папку", command=open_dir)
-main_menu.add_cascade(label="Заполнить таблицу", menu=file_menu)
+file_menu.add_command(label="Добавить сертификат", command=open_file)
+file_menu.add_command(label="Добавить папку", command=open_dir)
+main_menu.add_cascade(label="Сертификаты", menu=file_menu)
+
+# Изменение данных
+edit_menu = Menu(main_menu, tearoff=0)
+edit_menu.add_command(label="Изменить данные в таблице", command=open_win_edits)
+main_menu.add_cascade(label="Редактировать", menu=edit_menu)
 
 f1 = Frame(root, bg="#F1EEE9")
 f1.pack(fill=X, padx=10, pady=10)
@@ -743,25 +835,21 @@ btn_show_table.pack(side=LEFT)
 
 btn_show_date = Button(f2, font="Verdana 9", bg="#fca311", width=15, text='Меньше 3 месяцев', command=show_date,
                        padx=10, pady=5)
-btn_show_date.pack(side=LEFT)
+btn_show_date.pack(side=RIGHT)
 
 btn_ogrn = Button(f2, font="Verdana 9", width=15, bg="#fca311", text='Есть ОГРН', command=sort_ogrn, padx=10, pady=5)
 btn_ogrn.pack(side=RIGHT)
 
-btn_sort_name = Button(f2, font="Verdana 9", width=25, bg="#fca311", text='Сортировка по ФИО', command=sort_name,
-                       padx=10, pady=5)
-btn_sort_name.pack(side=RIGHT)
+sorters = ['ФИО', 'Дата окончания', 'Должность', 'Заметки']
+combo_sort = ttk.Combobox(f2, values=sorters, state='readonly')
+combo_sort.current(1)
+combo_sort.pack(side=LEFT, fill=X, padx=10, pady=5, ipady=5)
 
-btn_sort_time = Button(f2, font="Verdana 9", width=25, bg="#fca311", text='Сортировка по дате окончания',
-                       command=sort_time, padx=10,
-                       pady=5)
-btn_sort_time.pack(side=RIGHT)
+btn_sort = Button(f2, font="Verdana 9", bg="#fca311", text='Сортировать', command=sort, padx=10, pady=5)
+btn_sort.pack(side=LEFT)
 
-e = Entry(f2, font="Verdana 12", width=5)
-e.pack(padx=10, ipady=5, side=RIGHT)
-
-btn_del_id = Button(f2, font="Verdana 9", text='Удалить ID', bg="#fca311", command=del_id, padx=10, pady=5)
-btn_del_id.pack(side=RIGHT)
+btn_del_id = Button(f2, font="Verdana 9", text='Удалить', bg="#fca311", command=del_id, padx=10, pady=5)
+btn_del_id.pack(side=LEFT)
 
 check_near_info()
 
