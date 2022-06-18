@@ -407,13 +407,12 @@ def del_values():
 
 
 def sort():
-    print(combo_sort.get())
     if combo_sort.get() == "ФИО":
         sort_name()
     if combo_sort.get() == "Должность":
-        sort_time()
-    if combo_sort.get() == "Дата окончания":
         sort_job()
+    if combo_sort.get() == "Дата окончания":
+        sort_time()
     if combo_sort.get() == "Заметки":
         sort_note()
 
